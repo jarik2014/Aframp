@@ -38,7 +38,12 @@ export class ApiError extends Error {
     /** Machine-readable error code from the backend, e.g. `OTP_EXPIRED`. */
     readonly code?: string,
     /** Which request field the error applies to, for field-level validation errors. */
-    readonly field?: string
+    readonly field?: string,
+    /**
+     * Raw response body for a 5xx, kept for observability (error boundaries
+     * already forward ApiError to Sentry). Never render this to a user.
+     */
+    readonly detail?: string
   ) {
     super(message)
     this.name = 'ApiError'
@@ -124,18 +129,32 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // wrong password, not an expired session.
     if (response.status === 401 && token) onUnauthorized?.()
 
-    let message = `Request failed (${response.status})`
+    // A 5xx body is written for operators, not users: it can carry a SQL
+    // error, a panic or an internal id. 4xx bodies are the backend's validation
+    // copy and are safe to show, so only those reach the UI.
+    const isServerError = response.status >= 500
+    let message = isServerError
+      ? 'Something went wrong on our side. Please try again.'
+      : `Request failed (${response.status})`
     let code: string | undefined
     let field: string | undefined
+    let parsedError: string | undefined
     try {
       const parsed = JSON.parse(text) as { error?: string; code?: string; field?: string }
-      if (parsed.error) message = parsed.error
+      parsedError = parsed.error
       code = parsed.code
       field = parsed.field
     } catch {
       // Non-JSON body (proxy error page, panic); keep the status-code message.
     }
-    throw new ApiError(message, response.status, code, field)
+    if (!isServerError && parsedError) message = parsedError
+    throw new ApiError(
+      message,
+      response.status,
+      code,
+      field,
+      isServerError ? text.slice(0, 2000) : undefined
+    )
   }
 
   return text ? parseWithBigInts<T>(text) : (undefined as T)
