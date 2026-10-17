@@ -212,6 +212,50 @@ Once reviewed and approved, a maintainer will merge or cherry-pick sandbox work 
 
 ---
 
+## Running the CI gates locally
+
+Every check that blocks a pull request can be reproduced before pushing. Four of them are easy to
+miss because they only appear on PRs or need a build:
+
+| CI job | Local command | What it enforces |
+|--------|---------------|------------------|
+| Code Quality | `npm run type-check && npm run lint && npm run format:check` | `tsc --noEmit`, ESLint, Prettier |
+| Tests | `npm run test:coverage` | Jest with the coverage report CI consumes |
+| Diff Coverage (PR only) | `node scripts/check-diff-coverage.js <base-sha> <head-sha>` | **80% coverage on every changed file** — see below |
+| Bundle budget | `npm run build && node scripts/check-bundle-budget.mjs` | **40 KB gzipped** of route-specific JS per route |
+| E2E | `npx playwright install --with-deps chromium && npm run test:e2e` | Playwright suite from `playwright.config.ts` |
+
+### Diff coverage
+
+The script reads `./coverage` (produced by `npm run test:coverage`) and the patch between the two
+commits you pass. It needs git history, so it runs on the runner in CI, not in the test container:
+
+```bash
+npm run test:coverage
+node scripts/check-diff-coverage.js origin/main HEAD     # 80% on changed files
+```
+
+A file you touched with untested lines fails the check even when overall coverage is high — add tests
+for the lines you changed, not just for the module.
+
+### Bundle budget
+
+`scripts/check-bundle-budget.mjs` inspects the build output and fails when any single route ships more
+than 40 KB gzipped of route-specific JS. Run it after `npm run build`; use `npm run build:analyze` when
+a route is close to the limit and you need to see what is inside it.
+
+### End-to-end tests
+
+The e2e suite runs against a real browser. Install Chromium once, then run it:
+
+```bash
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
+CI runs the same two commands (`.github/workflows/ci.yml`, job `e2e`); a test that only passes with a
+different browser version will be caught there.
+
 ## Code Standards
 
 ### TypeScript
