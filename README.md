@@ -36,12 +36,13 @@ Aframp/
 │   ├── pages/             # Top-level page components (Dashboard, Onramp, Bills)
 │   ├── services/          # API and blockchain service integrations
 │   ├── styles/            # Global and module CSS/Tailwind config
-│   ├── utils/             # Helper functions and constants
 │   └── App.js             # Main application component
 ├── .env.example           # Environment variables template
 ├── package.json
 └── README.md
 ```
+
+---
 
 ## Architecture Decisions
 
@@ -49,7 +50,7 @@ Aframp/
 
 ---
 
-## � API Reference
+## 📚 API Reference
 
 The client-side contract is documented in the repository root OpenAPI file:
 
@@ -63,16 +64,15 @@ Offline caching and installable PWA support are currently disabled. Web Push pay
 remain available through a push-only service worker; the app does not cache pages or API data
 for offline use.
 
-## �🚀 Quick Start (5 Minutes)
+## 🚀 Quick Start (5 Minutes)
 
 Get AFRAMP running locally in under 5 minutes with our automated setup script or manual installation.
 
-> ⚠️ **Port constraint — read this first.** The backend binds port **3000** and its `CORS_ALLOWED_ORIGINS` defaults to `http://localhost:3001`. The frontend must therefore run on **3001**, not Next.js's default 3000. If you start the app on 3000, every API request will fail with a silent CORS/network error. Set `NEXT_PUBLIC_API_URL` to point at the backend and run the frontend on 3001 (see `.env.example`).
+> ⚠️ **Port constraint — read this first.** The backend binds port **3000**, so the frontend cannot use it; `npm run dev` and `npm start` pin this app to **3001**, and `docker-compose.dev.yml` maps it to 3001 as well. Browser requests never reach the backend directly: they go to this app's own origin at `/backend/*` and Next.js forwards them server-side to `NEXT_API_URL` (see `.env.example`).
 
 ### Automated Setup (Easiest) ⚡
 
 **Linux/Mac:**
-
 ```bash
 git clone https://github.com/your-org/Aframp.git
 cd Aframp
@@ -81,7 +81,6 @@ chmod +x scripts/setup.sh
 ```
 
 **Windows (PowerShell):**
-
 ```powershell
 git clone https://github.com/your-org/Aframp.git
 cd Aframp
@@ -89,7 +88,6 @@ cd Aframp
 ```
 
 The script will:
-
 - ✅ Check prerequisites (Node.js, Docker)
 - ✅ Create `.env.local` from template
 - ✅ Let you choose Docker or Node.js setup
@@ -188,7 +186,7 @@ docker-compose logs -f
 docker-compose down
 ```
 
-> ⚠️ The dev compose file maps the frontend to port **3001** because the backend binds 3000 and only allows `http://localhost:3001` by default via `CORS_ALLOWED_ORIGINS`. See `docker-compose.dev.yml` for the inline explanation.
+> ⚠️ The dev compose file maps the frontend to port **3001** to avoid colliding with the backend on 3000; API requests are proxied via `/backend/*` so no CORS configuration is needed. See `docker-compose.dev.yml`.
 
 ### Production
 
@@ -218,55 +216,95 @@ Pass environment variables via:
 ### Vercel (Recommended)
 
 1. **Connect Repository**
-   - Go to [vercel.com](https://vercel.com)
-   - Import your GitHub repository
-   - Select the `Aframp` project
+   - Import the repository to Vercel.
+   - Select the `Aframp` project.
 
-2. **Configure Environment Variables**
-   - In Vercel dashboard → Settings → Environment Variables
-   - Add all variables from `.env.example`
-   - Set `NEXT_PUBLIC_DEMO_MODE=false` for production
+2. **Environment Variables**
+   Set the following in Vercel → Settings → Environment Variables:
+   - `NEXT_API_URL`: Backend origin (e.g., `https://api.aframp.org`)
+   - `SENTRY_DSN`: Sentry DSN for error tracking (optional but recommended)
+   - `NEXT_PUBLIC_STELLAR_NETWORK`: `MAINNET` or `TESTNET`
+   - Any other variables from `.env.example` that are required for payment gateways, etc.
+   - Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser; keep `NEXT_API_URL` server‑only.
 
-3. **Deploy**
-   - Vercel auto-deploys on push to `main`
-   - Preview deployments for PRs
-   - Production URL: `https://your-project.vercel.app`
+3. **Build & Deploy**
+   - Vercel runs `npm install`, `npm run build`, and starts the Next.js server.
+   - Pushes to `main` trigger production deployments; preview deployments for PRs.
 
-### Other Platforms
+4. **Domain Configuration**
+   - Add your custom domain in Vercel → Domains.
+   - Vercel automatically provisions SSL.
 
-#### Railway
+5. **Rollback**
+   - In Vercel → Deployments, select a previous deployment and click “Rollback”.
 
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
+### Docker Standalone Deployment
 
-# Login and deploy
-railway login
-railway init
-railway up
-```
-
-#### Render
-
-1. Create new Web Service
-2. Connect GitHub repository
-3. Build Command: `npm run build`
-4. Start Command: `npm start`
-5. Add environment variables in dashboard
-
-#### AWS/GCP/Azure
-
-Use the provided `Dockerfile` for containerized deployment:
+#### Building the Image
 
 ```bash
-# Build and push to container registry
 docker build -t aframp:latest .
-docker tag aframp:latest your-registry/aframp:latest
-docker push your-registry/aframp:latest
-
-# Deploy using your platform's container service
-# (ECS, Cloud Run, Container Apps, etc.)
 ```
+
+#### Running the Container
+
+```bash
+docker run -d \
+  --name aframp \
+  -p 3000:3000 \
+  --env-file .env.local \
+  aframp:latest
+```
+
+The container expects the backend to be reachable at the URL given in `NEXT_API_URL`. The Next.js rewrites (`/backend/* → NEXT_API_URL`) are built into the image.
+
+#### Environment Variables
+
+Create a `.env.local` file (or pass `-e` flags) with at least:
+
+- `NEXT_API_URL`: Backend origin (e.g., `http://host.docker.internal:3000` when backend runs on host)
+- `SENTRY_DSN`: Optional Sentry DSN
+- `NODE_ENV=production`
+- Any other required variables (see `.env.example`)
+
+#### Health Check
+
+The container includes a healthcheck that queries `http://localhost:3000`; ensure the port mapping matches.
+
+#### Rollback
+
+- Tag previous images: `docker tag aframp:previous aframp:latest` and redeploy.
+- Or keep a history of image tags and reuse.
+
+## Backend Proxy (Same‑Origin)
+
+All API requests from the frontend go to `/backend/*`. In `next.config.mjs` a rewrite forwards them to the URL in `NEXT_API_URL`. This keeps the backend origin server‑only and avoids CORS.
+
+## Sentry Integration
+
+- The SDK is initialized in `sentry.server.config.ts` and `sentry.client.config.ts`.
+- Required variable: `SENTRY_DSN` (or `NEXT_PUBLIC_SENTRY_DSN`).
+- In development, Sentry is disabled unless `NODE_ENV=production`.
+- Release is inferred from `NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA` when on Vercel, otherwise falls back to `dev`.
+
+## Local Development with Docker Compose
+
+For local testing of the production‑like setup:
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+This reads `.env.local` and starts the container on port 3000.
+
+## Verification
+
+After deployment, verify:
+
+- The UI loads at the assigned domain.
+- API calls to `/backend/*` succeed (check network tab).
+- Sentry receives test errors if configured.
+- Health endpoint returns 200.
 
 ---
 
@@ -274,22 +312,22 @@ docker push your-registry/aframp:latest
 
 ### All API calls fail with a network error
 
-If every request to the backend fails (browser console shows CORS errors or `net::ERR_FAILED`), you are almost certainly running the frontend on the wrong port.
+If every request to the backend fails (browser console shows network errors), check that the frontend is configured to call the backend via the `/backend/*` proxy.
 
-- The backend binds port **3000** and its `CORS_ALLOWED_ORIGINS` defaults to `http://localhost:3001`.
-- Next.js defaults to port **3000**, which collides with the backend and is not in the allowed origins list.
+- The backend binds port **3000** and is reachable via the Next.js rewrite from `/backend/:path*` to the URL in `NEXT_API_URL`.
+- Ensure `NEXT_API_URL` is set in `.env.local` to the backend URL (e.g., `http://localhost:3000`).
+- The frontend can run on any port because API requests are same-origin to `/backend/*`; with the backend on 3000, the repo's `dev`/`start` scripts pin the app to 3001 to avoid the collision.
 
-**Fix:** run the frontend on **3001** and point it at the backend:
+**Fix:** verify `.env.local` contains `NEXT_API_URL=http://localhost:3000` (or appropriate backend URL) and that the frontend is calling `/backend/*` endpoints (as done in lib/api.ts). Then start the frontend:
 
 ```bash
 # Node.js
-npm run dev -- -p 3001
-
-# Docker (already configured in docker-compose.dev.yml)
-docker-compose -f docker-compose.dev.yml up
+npm run dev
 ```
 
-Make sure `.env.local` sets `NEXT_PUBLIC_API_URL` to the backend URL (e.g. `http://localhost:3000`) and that the backend's `CORS_ALLOWED_ORIGINS` includes your frontend origin (`http://localhost:3001` by default). See `.env.example` for details.
+Docker compose already maps frontend to 3001 and backend to 3000; the proxy works automatically.
+
+Make sure `.env.local` sets `NEXT_API_URL` to the backend URL (e.g. `http://localhost:3000`). See `.env.example` for details.
 
 ---
 
@@ -297,6 +335,25 @@ Make sure `.env.local` sets `NEXT_PUBLIC_API_URL` to the backend URL (e.g. `http
 
 | Command | Description |
 | ------- | ----------- |
+| `build` | `next build` |
+| `build:analyze` | `ANALYZE=true next build` |
+| `dev` | `next dev -p 3001` |
+| `lint` | `eslint .` |
+| `lint:next` | `next lint` |
+| `start` | `next start -p 3001` |
+| `test` | `jest --passWithNoTests` |
+| `test:watch` | `jest --watch` |
+| `test:coverage` | `jest --coverage --passWithNoTests` |
+| `test:e2e` | `playwright test` |
+| `test:diff-coverage` | `node scripts/check-diff-coverage.js` |
+| `format` | `prettier --write .` |
+| `format:check` | `prettier --check '**/*.{ts,tsx,css,json,md}'` |
+| `type-check` | `tsc --noEmit` |
+| `prepare` | `husky install || true` |
+| `lighthouse` | `lhci autorun` |
+| `security:audit` | `npm audit --audit-level=high` |
+| `security:owasp` | `bash scripts/owasp-scan.sh` |
+| `security:all` | `npm run security:audit && npm run security:owasp` |
 
 _Built for Africa, Verified by Blockchain. Onramp to the future. Offramp to opportunity._ 🔗🌍
 
